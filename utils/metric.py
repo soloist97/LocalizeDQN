@@ -2,7 +2,7 @@ import torch
 from torchvision.ops.boxes import box_iou
 
 
-class BBoxPrecisionRecall(object):
+class bboxPrecisionRecall(object):
 
     def __init__(self, IoU_thresholds=(0.5, 0.6, 0.7)):
 

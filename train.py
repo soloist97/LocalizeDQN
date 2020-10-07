@@ -16,7 +16,7 @@ def train(args):
             cur_bbox = (0., 0., original_shape[0], original_shape[1])
             scale_factors = (224. / original_shape[0], 224. / original_shape[1])
             history_actions = deque(maxlen=args['max_steps'])  # deque of int
-            hit_flags = [-1.] * len(bbox_gt_list)
+            hit_flags = [0] * len(bbox_gt_list)  # use 0 instead of -1 in original paper
             total_reward = 0.
 
             global_feature, feature_map = encoder(img_tensor)
@@ -29,7 +29,7 @@ def train(args):
                 action = dqn.act(state, epsilon)
 
                 # environment
-                next_bbox = next_bbox_by_action(cur_bbox, action)
+                next_bbox = next_bbox_by_action(cur_bbox, action, original_shape)
                 next_bbox_feature = encoder.encode_bbox(feature_map, next_bbox, scale_factors)
                 history_actions.append(action)
 
