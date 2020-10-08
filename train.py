@@ -4,6 +4,7 @@ from collections import deque
 import torch
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
+from torch.nn.utils.clip_grad import clip_grad_value_
 from tqdm import tqdm
 
 from model.dqn import DQN
@@ -23,7 +24,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 USE_TB = False
 CONFIG_PATH = './model_params'
 MODEL_NAME = 'debug'
-TOTAL_EPOCH = 25
+TOTAL_EPOCH = 15
 
 
 def set_args():
@@ -36,20 +37,22 @@ def set_args():
     args['display_intervals'] = 10
 
     # Model settings
-    args['max_history'] = 50
+    args['max_history'] = 15
     args['num_inputs'] = 4096 * 2 + len(ACTION_FUNC_DICT) * args['max_history']  # 8842
     args['num_actions'] = (5, 8)
     args['dropout_rate'] = 0.3
 
     # Training Settings
     args['total_epochs'] = TOTAL_EPOCH
-    args['max_steps'] = 50
-    args['replay_capacity'] = 250000  # ~ len(trainval) * 50
+    args['max_steps'] = 15
+    args['replay_capacity'] = 80000  # ~ len(trainval) * 15
     args['gamma'] = 0.9
     args['shuffle'] = False  # whether shuffle voc_trainval
+    args['epsilon_duration'] = int(TOTAL_EPOCH * 2 / 5)
 
     args['lr'] = 1e-3
-    args['batch_size'] = 64
+    args['batch_size'] = 16
+    args['grad_clip'] = 5.
 
     if not os.path.exists(os.path.join(CONFIG_PATH, MODEL_NAME)):
         os.mkdir(os.path.join(CONFIG_PATH, MODEL_NAME))
@@ -57,6 +60,19 @@ def set_args():
         json.dump(args, f, indent=2)
 
     return args
+
+
+def save_model(dqn, optimizer, epoch, checkpoint_name=None):
+
+    states = {'config_path': os.path.join(CONFIG_PATH, MODEL_NAME, 'config.json'),
+              'dqn': dqn.state_dict(),
+              'optimizer': optimizer.state_dict(),
+              'epoch': epoch}
+
+    filename = os.path.join('model_params', MODEL_NAME,
+                            '{}.pth.tar'.format(checkpoint_name if checkpoint_name else 'epoch_'+str(epoch)))
+    print('Saving checkpoint to {}'.format(filename))
+    torch.save(states, filename)
 
 
 def train(args):
@@ -75,7 +91,7 @@ def train(args):
     # === prepare data loader ====
     voc_trainval_loader = DataLoaderPFG(VOCLocalization(args['voc2007_path'], year='2007', image_set='trainval',
                                                         download=False, transform=VOCLocalization.get_transform()),
-                                        batch_size=1, shuffle=args['shuffle'], num_workers=2, pin_memory=True,
+                                        batch_size=1, shuffle=args['shuffle'], num_workers=1, pin_memory=True,
                                         collate_fn=VOCLocalization.collate_fn)
 
     # use tensorboard to track the loss
@@ -88,7 +104,7 @@ def train(args):
     for epoch in range(args['total_epochs']):
 
         dqn.train()
-        epsilon = epsilon_by_epoch(epoch)
+        epsilon = epsilon_by_epoch(epoch, duration=args['epsilon_duration'])
 
         for it, (img_tensor, original_shape, bbox_gt_list) in tqdm(enumerate(voc_trainval_loader),
                                                                    total=len(voc_trainval_loader)):
@@ -127,6 +143,8 @@ def train(args):
 
                     optimizer.zero_grad()
                     loss.backward()
+                    if args['grad_clip'] > 0:
+                        clip_grad_value_(dqn.parameters(), args['grad_clip'])
                     optimizer.step()
 
                 # for display
@@ -136,10 +154,13 @@ def train(args):
                 writer.add_scalar('training/reward', sum(all_rewards), epoch * len(voc_trainval_loader) + it)
 
             if it % args['display_intervals'] == 0:
-                print('[{}][{}] rewards {}:{}'.format(epoch, it, sum(all_rewards), all_rewards))
+                tqdm.write('[{}][{}] rewards {}:{}'.format(epoch, it, sum(all_rewards), all_rewards))
+
+        save_model(dqn, optimizer, epoch)
 
     if USE_TB:
         writer.close()
+
 
 if __name__ == '__main__':
 
