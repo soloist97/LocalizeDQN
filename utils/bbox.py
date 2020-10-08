@@ -118,3 +118,14 @@ def next_bbox_by_action(cur_bbox, action, original_img_shape=None):
 
     return new_bbox
 
+
+def resize_bbox(bbox, scale_factors):
+    """
+
+    :param bbox: (tuple) (xmin, ymin, xmax, ymax)
+    :param scale_factors: (tuple) (width_factor, height_factor)
+    :return: (tuple) (xmin', ymin', xmax', ymax')
+    """
+
+    return (bbox[0] * scale_factors[0], bbox[1] * scale_factors[1],
+            bbox[2] * scale_factors[0], bbox[3] * scale_factors[1])

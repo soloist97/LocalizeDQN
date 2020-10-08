@@ -4,11 +4,11 @@ from collections import deque
 import torch
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 from model.dqn import DQN
-from model.encoder import VGG16Encoder
 from dataloader import DataLoaderPFG, VOCLocalization
-from utils.bbox import ACTION_FUNC_DICT, next_bbox_by_action
+from utils.bbox import ACTION_FUNC_DICT, next_bbox_by_action, resize_bbox
 from utils.loss import compute_td_loss
 from utils.explore import epsilon_by_epoch
 from utils.replay import ReplayBuffer
@@ -64,17 +64,13 @@ def train(args):
     print('[INFO]: Model {} start training...'.format(MODEL_NAME))
 
     # === init model ====
-    encoder = VGG16Encoder()
     dqn = DQN(num_inputs=args['num_inputs'], num_actions=args['num_actions'],
               max_history=args['max_history'], dropout_rate=args['dropout_rate'])
 
     # move model to GPU before optimizer
-    encoder = encoder.to(device)
     dqn = dqn.to(device)
 
-    optimizer = torch.optim.Adam([{'params': filter(lambda p: p.requires_grad, encoder.parameters())},
-                                  {'params': filter(lambda p: p.requires_grad, dqn.parameters())}],
-                                  lr=args['lr'])
+    optimizer = torch.optim.Adam(dqn.parameters(), lr=args['lr'])
 
     # === prepare data loader ====
     voc_trainval_loader = DataLoaderPFG(VOCLocalization(args['voc2007_path'], year='2007', image_set='trainval',
@@ -91,10 +87,11 @@ def train(args):
 
     for epoch in range(args['total_epochs']):
 
-        encoder.train(); dqn.train()
+        dqn.train()
         epsilon = epsilon_by_epoch(epoch)
 
-        for it, (img_tensor, original_shape, bbox_gt_list) in enumerate(voc_trainval_loader):
+        for it, (img_tensor, original_shape, bbox_gt_list) in tqdm(enumerate(voc_trainval_loader),
+                                                                   total=len(voc_trainval_loader)):
 
             img_tensor = img_tensor.to(device)
             original_shape = original_shape[0]
@@ -104,11 +101,9 @@ def train(args):
             scale_factors = (224. / original_shape[0], 224. / original_shape[1])
             history_actions = deque(maxlen=args['max_steps'])  # deque of int
             hit_flags = [0] * len(bbox_gt_list)  # use 0 instead of -1 in original paper
-            total_reward = 0.
+            all_rewards = list()
 
-            global_feature, feature_map = encoder(img_tensor)
-            bbox_feature = encoder.encode_bbox(feature_map, cur_bbox, scale_factors)
-            state = (global_feature, bbox_feature, [history_actions.copy()])
+            state = (img_tensor, resize_bbox(cur_bbox, scale_factors), history_actions.copy())
 
             for step in range(args['max_steps']):
 
@@ -117,10 +112,9 @@ def train(args):
 
                 # environment
                 next_bbox = next_bbox_by_action(cur_bbox, action, original_shape)
-                next_bbox_feature = encoder.encode_bbox(feature_map, next_bbox, scale_factors)
                 history_actions.append(action)
 
-                next_state = (global_feature, next_bbox_feature, [history_actions.copy()])
+                next_state = (img_tensor, resize_bbox(next_bbox, scale_factors), history_actions.copy())
                 reward, hit_flags = reward_by_bboxes(cur_bbox, next_bbox, bbox_gt_list, hit_flags)
 
                 # replay
@@ -136,13 +130,13 @@ def train(args):
                     optimizer.step()
 
                 # for display
-                total_reward += reward
+                all_rewards.append(reward)
 
             if USE_TB:
-                writer.add_scalar('training/reward', total_reward, epoch * len(voc_trainval_loader) + it)
+                writer.add_scalar('training/reward', sum(all_rewards), epoch * len(voc_trainval_loader) + it)
 
             if it % args['display_intervals'] == 0:
-                print('[{}][{}] total reward {}'.format(epoch, it, total_reward))
+                print('[{}][{}] rewards {}:{}'.format(epoch, it, sum(all_rewards), all_rewards))
 
     if USE_TB:
         writer.close()

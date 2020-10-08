@@ -52,22 +52,15 @@ class VGG16Encoder(nn.Module):
 
         return global_feature, feature_map
 
-    def encode_bbox(self, feature_map, bbox, scale_factors):
+    def encode_bbox(self, feature_map, scaled_bbox):
         """
 
-        :param feature_map: (tensor) (1, 512, 14, 14)
-        :param bbox: (tuple) (xmin, ymin, xmax, ymax)
-        :param scale_factors: (tuple) (width_factor, height_factor)
-        :return: (1, 4096)
+        :param feature_map: (tensor) (batch_size, 512, 14, 14)
+        :param scaled_bbox: (list[tuple]) [(xmin, ymin, xmax, ymax), ...]
+        :return: (batch_size, 4096)
         """
 
-        assert feature_map.shape[0] == 1, "Do not support batch input"
-        assert isinstance(bbox, tuple) and len(bbox) == 4, 'invalid bbox input'
-        assert isinstance(scale_factors, tuple) and len(scale_factors) == 2, 'invalid scale_factors input'
-
-        scaled_bbox = (bbox[0] * scale_factors[0], bbox[1] * scale_factors[1],
-                       bbox[2] * scale_factors[0], bbox[3] * scale_factors[1])
-        roi = [torch.tensor([scaled_bbox], dtype=torch.float).to(feature_map.device)]  # [(1, 4)]
+        roi = [torch.tensor([box], dtype=torch.float).to(feature_map.device) for box in scaled_bbox]  # [(1, 4), ...]
 
         bbox_map = self.roi_pool(feature_map, roi)
         x = self.flatten(bbox_map)

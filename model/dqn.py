@@ -1,7 +1,10 @@
 import random
+from collections import deque
 
 import torch
 from torch import nn
+
+from model.encoder import VGG16Encoder
 
 
 class DQN(nn.Module):
@@ -16,6 +19,8 @@ class DQN(nn.Module):
         self.num_actions = num_actions  # (scaling_action, local_translation_action)
         self.max_history = max_history
         self.dropout_rate = dropout_rate
+
+        self.encoder = VGG16Encoder()
 
         # delete the last 1024 Linear layer for simplicity
         self.layers = nn.Sequential(
@@ -34,13 +39,21 @@ class DQN(nn.Module):
     def forward(self, state):
         """
 
-        :param state: (tuple) (tensor, tensor, list(deque))
+        :param state: (tuple) (img_tensor, list(scaled_bbox), list(deque))
         :return: (tensor) (batch_size, num_actions)
         """
 
-        global_feature, bbox_feature, history_actions = state
-        batch_size = global_feature.shape[0]
-        device = global_feature.device
+        img_tensor, scaled_bbox, history_actions = state
+        if isinstance(scaled_bbox, tuple):
+            scaled_bbox = [scaled_bbox]
+        if isinstance(history_actions, deque):
+            history_actions = [history_actions]
+
+        batch_size = img_tensor.shape[0]
+        device = img_tensor.device
+
+        global_feature, feature_map = self.encoder(img_tensor)
+        bbox_feature = self.encoder.encode_bbox(feature_map, scaled_bbox)
 
         # (batch_size, max_history, total_num_actions)
         history_emb= torch.zeros(batch_size, self.max_history, (self.num_actions[0] + self.num_actions[1]))
@@ -59,7 +72,8 @@ class DQN(nn.Module):
     @torch.no_grad()
     def act(self, state, epsilon):
 
-        assert len(state[2]) == 1, "Do not support batch input"
+        assert isinstance(state[2], deque) or (isinstance(state[2], list) and len(state[2]) == 1), \
+               "Not support batch input"
 
         # record mode
         is_training = self.training

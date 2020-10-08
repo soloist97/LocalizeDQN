@@ -13,12 +13,13 @@ class ReplayBuffer(object):
     def push(self, state, action, reward, next_state):
         """
 
-        :param state: (tuple) (tensor, tensor, list(deque))
+        :param state: (tuple) (tensor, tuple, deque)
         :param action: (int)
         :param reward: (float)
-        :param next_state: (tuple) (tensor, tensor, list(deque))
+        :param next_state: (tuple) (tensor, tuple, deque)
         :return:
         """
+        assert state[0].shape[0] == 1, "Not support batch input"
 
         # save memory for GPU
         state = tuple(s.cpu() if isinstance(s, torch.Tensor) else s for s in state)
@@ -30,11 +31,11 @@ class ReplayBuffer(object):
 
         state, action, reward, next_state = zip(*random.sample(self.buffer, batch_size))
 
-        gf, fm, hs = zip(*state)
-        state = (torch.cat(gf, dim=0).to(device), torch.cat(fm, dim=0).to(device), [h[0] for h in hs])
+        it, bbox, hs = zip(*state)
+        state = (torch.cat(it, dim=0).to(device), list(bbox), list(hs))
 
-        gf, fm, hs = zip(*next_state)
-        next_state = (torch.cat(gf, dim=0).to(device), torch.cat(fm, dim=0).to(device), [h[0] for h in hs])
+        it, bbox, hs = zip(*next_state)
+        next_state = (torch.cat(it, dim=0).to(device), list(bbox), list(hs))
 
         action = torch.tensor(action, dtype=torch.long).to(device)
         reward = torch.tensor(reward, dtype=torch.float).to(device)
