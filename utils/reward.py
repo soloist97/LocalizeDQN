@@ -12,7 +12,7 @@ def reward_by_bboxes(cur_bbox, next_bbox, bbox_gt_list, hit_flags):
     :return: reward (float) updated_hit_flags (list)
     """
 
-    assert len(bbox_gt_list) > 1, "invalid reward bbox_gt_list input"
+    assert len(bbox_gt_list) > 0, "invalid reward bbox_gt_list input"
 
     # (2, 4)
     bbox_pred = torch.tensor([cur_bbox, next_bbox], dtype=bbox_gt_list[0].dtype).to(bbox_gt_list[0].device)

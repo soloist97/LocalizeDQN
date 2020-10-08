@@ -2,17 +2,18 @@ import torch
 import torch.nn.functional as F
 
 
-def compute_td_loss(dqn, replay_buffer, batch_size, gamma=0.9):
+def compute_td_loss(dqn, replay_buffer, batch_size, gamma=0.9, device='cpu'):
     """
 
     :param dqn: (model.dqn.DQN)
     :param replay_buffer: (utils.replay.ReplayBuffer)
     :param batch_size: (int)
     :param gamma: (float)
+    :param device: (str or torch.device)
     :return: loss (tensor)
     """
 
-    state, action, reward, next_state = replay_buffer.sample(batch_size, dqn.device)
+    state, action, reward, next_state = replay_buffer.sample(batch_size, device)
 
     q_values = dqn(state)  # (batch_size, num_actions)
     next_q_values = dqn(next_state).detach()  # no gradient along this path

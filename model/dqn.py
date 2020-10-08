@@ -47,7 +47,8 @@ class DQN(nn.Module):
         for i in range(batch_size):
             if len(history_actions[i]) == 0:
                 continue
-            history_emb[i, torch.arange(self.max_history), torch.tensor(history_actions[i], dtype=torch.long)] = 1.
+            history_emb[i, torch.arange(len(history_actions[i])),
+                        torch.tensor(history_actions[i], dtype=torch.long)] = 1.
         history_emb = history_emb.to(device)
 
         # (batch_size, num_inputs)
