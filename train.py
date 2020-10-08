@@ -21,7 +21,7 @@ def train(args):
 
             global_feature, feature_map = encoder(img_tensor)
             bbox_feature = encoder.encode_bbox(feature_map, cur_bbox, scale_factors)
-            state = (global_feature, bbox_feature, history_actions.copy())
+            state = (global_feature, bbox_feature, [history_actions.copy()])
 
             for step in range(args['max_steps']):
 
@@ -33,13 +33,13 @@ def train(args):
                 next_bbox_feature = encoder.encode_bbox(feature_map, next_bbox, scale_factors)
                 history_actions.append(action)
 
-                next_state = (global_feature, next_bbox_feature, history_actions.copy())
+                next_state = (global_feature, next_bbox_feature, [history_actions.copy()])
                 reward, hit_flags = reward_by_bboxes(cur_bbox, next_bbox, bbox_gt_list, hit_flags)
 
                 # replay
                 replay_buffer.push(state, action, reward, next_state)
                 if len(replay_buffer) > args['batch_size']:
-                    loss = compute_td_loss(dqn, replay_buffer, args['gamma'])
+                    loss = compute_td_loss(dqn, replay_buffer, args['batch_size'], args['gamma'])
 
                     optimizer.zero_grad()
                     loss.backward()
