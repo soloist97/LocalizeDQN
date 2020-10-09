@@ -62,4 +62,4 @@ class VOCLocalization(VOCDetection):
                     float(object['bndbox']['xmax']), float(object['bndbox']['ymax'])]
             object_bbox_list.append(torch.tensor(bbox, dtype=torch.float))
 
-        return (data_tuple[0], original_shape, object_bbox_list)
+        return data_tuple[0], original_shape, object_bbox_list, index

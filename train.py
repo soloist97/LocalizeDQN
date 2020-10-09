@@ -108,12 +108,13 @@ def train(args):
         if USE_TB:
             writer.add_scalar('training/epsilon', epsilon, epoch)
 
-        for it, (img_tensor, original_shape, bbox_gt_list) in tqdm(enumerate(voc_trainval_loader),
-                                                                   total=len(voc_trainval_loader)):
+        for it, (img_tensor, original_shape, bbox_gt_list, image_idx) in tqdm(enumerate(voc_trainval_loader),
+                                                                              total=len(voc_trainval_loader)):
 
             img_tensor = img_tensor.to(device)
             original_shape = original_shape[0]
             bbox_gt_list = bbox_gt_list[0]
+            image_idx = image_idx[0]
 
             cur_bbox = (0., 0., original_shape[0], original_shape[1])
             scale_factors = (224. / original_shape[0], 224. / original_shape[1])
@@ -136,7 +137,7 @@ def train(args):
                 reward, hit_flags = reward_by_bboxes(cur_bbox, next_bbox, bbox_gt_list, hit_flags)
 
                 # replay
-                replay_buffer.push(state, action, reward, next_state)
+                replay_buffer.push(image_idx, state, action, reward, next_state)
                 if len(replay_buffer) > args['batch_size']:
                     loss = compute_td_loss(dqn, replay_buffer, args['batch_size'], args['gamma'], device)
                     if USE_TB:
