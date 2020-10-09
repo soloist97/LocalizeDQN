@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from torchvision.models import vgg16
+from torchvision.models import vgg16, resnet50
 from torchvision.ops import RoIPool
 
 
@@ -64,6 +64,68 @@ class VGG16Encoder(nn.Module):
 
         bbox_map = self.roi_pool(feature_map, roi)
         x = self.flatten(bbox_map)
+        bbox_feature = self.bbox_fc(x)
+
+        return bbox_feature
+
+
+class RESNET50Encoder(nn.Module):
+
+    def __init__(self):
+
+        super(RESNET50Encoder, self).__init__()
+
+        convnet = resnet50(pretrained=True)
+
+        self.backbone = nn.Sequential(*list(convnet.children())[:-2])
+        self.pooling = nn.AdaptiveMaxPool2d((1, 1))
+        self.flatten = nn.Flatten(start_dim=1)
+        self.global_fc = nn.Sequential(
+            nn.Linear(2048, 1024),
+            nn.ReLU()
+        )
+        self.bbox_fc = nn.Sequential(
+            nn.Linear(2048, 1024),
+            nn.ReLU()
+        )
+
+        self.roi_pool = RoIPool(output_size=(3, 3), spatial_scale=1/32)  #  7/224
+
+        self.__init()
+
+    def __init(self):
+
+        # freeze
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+
+    def forward(self, img_tensor):
+        """
+
+        :param img_tensor: (tensor) shape (batch_size, 3, 224, 224)
+        :return: (batch_size, 1024) (batch_size, 2048, 7, 7)
+        """
+
+        feature_map = self.backbone(img_tensor)
+        x = self.pooling(feature_map)
+        x = self.flatten(x)
+        global_feature = self.global_fc(x)
+
+        return global_feature, feature_map
+
+    def encode_bbox(self, feature_map, scaled_bbox):
+        """
+
+        :param feature_map: (tensor) (batch_size, 2048, 7, 7)
+        :param scaled_bbox: (list[tuple]) [(xmin, ymin, xmax, ymax), ...]
+        :return: (batch_size, 2048)
+        """
+
+        roi = [torch.tensor([box], dtype=torch.float).to(feature_map.device) for box in scaled_bbox]  # [(1, 4), ...]
+
+        bbox_map = self.roi_pool(feature_map, roi)
+        x = self.pooling(bbox_map)
+        x = self.flatten(x)
         bbox_feature = self.bbox_fc(x)
 
         return bbox_feature

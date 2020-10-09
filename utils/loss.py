@@ -15,8 +15,10 @@ def compute_td_loss(dqn, replay_buffer, batch_size, gamma=0.9, device='cpu'):
 
     state, action, reward, next_state = replay_buffer.sample(batch_size, device)
 
-    q_values = dqn(state)  # (batch_size, num_actions)
-    next_q_values = dqn(next_state).detach()  # no gradient along this path
+    global_feature, feature_map = dqn.encoder(state[0])
+
+    q_values = dqn(state, global_feature, feature_map)  # (batch_size, num_actions)
+    next_q_values = dqn(next_state, global_feature, feature_map).detach()  # no gradient along this path
 
     q_value = q_values[torch.arange(batch_size), action]  # (batch_size, )
     next_q_value = next_q_values.max(dim=-1)[0]

@@ -4,7 +4,7 @@ from collections import deque
 import torch
 from torch import nn
 
-from model.encoder import VGG16Encoder
+from model.encoder import VGG16Encoder, RESNET50Encoder
 
 
 class DQN(nn.Module):
@@ -20,26 +20,25 @@ class DQN(nn.Module):
         self.max_history = max_history
         self.dropout_rate = dropout_rate
 
-        self.encoder = VGG16Encoder()
+        self.encoder = RESNET50Encoder()
 
-        # delete the last 1024 Linear layer for simplicity
+        # delete few Linear layers for simplicity
         self.layers = nn.Sequential(
-            nn.Linear(num_inputs, 4096),
+            nn.Linear(num_inputs, 1024),
             nn.ReLU(),
             nn.Dropout(dropout_rate),
-            nn.Linear(4096, 1024),
+            nn.Linear(1024, 512),
             nn.ReLU(),
             nn.Dropout(dropout_rate),
-            nn.Linear(1024, 1024),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(1024, num_actions[0] + num_actions[1])
+            nn.Linear(512, num_actions[0] + num_actions[1])
         )
 
-    def forward(self, state):
+    def forward(self, state, global_feature=None, feature_map=None):
         """
 
         :param state: (tuple) (img_tensor, list(scaled_bbox), list(deque))
+        :param global_feature: (None or tensor) (batch_size, 4096)
+        :param feature_map: (None or tensor) (batch_size, 512, 14, 14)
         :return: (tensor) (batch_size, num_actions)
         """
 
@@ -52,7 +51,8 @@ class DQN(nn.Module):
         batch_size = img_tensor.shape[0]
         device = img_tensor.device
 
-        global_feature, feature_map = self.encoder(img_tensor)
+        if not isinstance(global_feature, torch.Tensor) or not isinstance(feature_map, torch.Tensor):
+            global_feature, feature_map = self.encoder(img_tensor)
         bbox_feature = self.encoder.encode_bbox(feature_map, scaled_bbox)
 
         # (batch_size, max_history, total_num_actions)

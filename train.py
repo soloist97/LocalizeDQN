@@ -24,7 +24,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 USE_TB = False
 CONFIG_PATH = './model_params'
 MODEL_NAME = 'debug'
-TOTAL_EPOCH = 15
+TOTAL_EPOCH = 10
 
 
 def set_args():
@@ -34,11 +34,11 @@ def set_args():
     # General settings
     args['model_name'] = MODEL_NAME
     args['voc2007_path'] = './data/voc2007'
-    args['display_intervals'] = 10
+    args['display_intervals'] = 500
 
     # Model settings
     args['max_history'] = 15
-    args['num_inputs'] = 4096 * 2 + len(ACTION_FUNC_DICT) * args['max_history']  # 8842
+    args['num_inputs'] = 1024 * 2 + len(ACTION_FUNC_DICT) * args['max_history']
     args['num_actions'] = (5, 8)
     args['dropout_rate'] = 0.3
 
@@ -105,6 +105,8 @@ def train(args):
 
         dqn.train()
         epsilon = epsilon_by_epoch(epoch, duration=args['epsilon_duration'])
+        if USE_TB:
+            writer.add_scalar('training/epsilon', epsilon, epoch)
 
         for it, (img_tensor, original_shape, bbox_gt_list) in tqdm(enumerate(voc_trainval_loader),
                                                                    total=len(voc_trainval_loader)):
