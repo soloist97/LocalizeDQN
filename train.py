@@ -14,6 +14,7 @@ from utils.loss import compute_td_loss
 from utils.explore import epsilon_by_epoch
 from utils.replay import ReplayBuffer
 from utils.reward import reward_by_bboxes
+from evaluate import evaluate
 
 torch.backends.cudnn.benchmark = True
 np.random.seed(42)
@@ -48,11 +49,11 @@ def set_args():
     args['replay_capacity'] = 80000  # ~ len(trainval) * 15
     args['gamma'] = 0.9
     args['shuffle'] = False  # whether shuffle voc_trainval
-    args['epsilon_duration'] = int(TOTAL_EPOCH * 2 / 5)
+    args['epsilon_duration'] = int(TOTAL_EPOCH * 2 / 5) if int(TOTAL_EPOCH * 2 / 5) > 0 else 1
 
     args['lr'] = 1e-3
     args['batch_size'] = 16
-    args['grad_clip'] = 5.
+    args['grad_clip'] = 1.
 
     if not os.path.exists(os.path.join(CONFIG_PATH, MODEL_NAME)):
         os.mkdir(os.path.join(CONFIG_PATH, MODEL_NAME))
@@ -89,10 +90,10 @@ def train(args):
     optimizer = torch.optim.Adam(dqn.parameters(), lr=args['lr'])
 
     # === prepare data loader ====
-    voc_trainval_loader = DataLoaderPFG(VOCLocalization(args['voc2007_path'], year='2007', image_set='trainval',
-                                                        download=False, transform=VOCLocalization.get_transform()),
-                                        batch_size=1, shuffle=args['shuffle'], num_workers=1, pin_memory=True,
-                                        collate_fn=VOCLocalization.collate_fn)
+    voc_loader = DataLoaderPFG(VOCLocalization(args['voc2007_path'], year='2007', image_set='trainval',
+                                               download=False, transform=VOCLocalization.get_transform()),
+                                batch_size=1, shuffle=args['shuffle'], num_workers=1, pin_memory=True,
+                                collate_fn=VOCLocalization.collate_fn)
 
     # use tensorboard to track the loss
     if USE_TB:
@@ -108,8 +109,8 @@ def train(args):
         if USE_TB:
             writer.add_scalar('training/epsilon', epsilon, epoch)
 
-        for it, (img_tensor, original_shape, bbox_gt_list, image_idx) in tqdm(enumerate(voc_trainval_loader),
-                                                                              total=len(voc_trainval_loader)):
+        for it, (img_tensor, original_shape, bbox_gt_list, image_idx) in tqdm(enumerate(voc_loader),
+                                                                              total=len(voc_loader)):
 
             img_tensor = img_tensor.to(device)
             original_shape = original_shape[0]
@@ -142,7 +143,7 @@ def train(args):
                     loss = compute_td_loss(dqn, replay_buffer, args['batch_size'], args['gamma'], device)
                     if USE_TB:
                         writer.add_scalar('training/loss', loss.item(),
-                                          (epoch * len(voc_trainval_loader) + it) * args['max_steps'] + step)
+                                          (epoch * len(voc_loader) + it) * args['max_steps'] + step)
 
                     optimizer.zero_grad()
                     loss.backward()
@@ -154,10 +155,19 @@ def train(args):
                 all_rewards.append(reward)
 
             if USE_TB:
-                writer.add_scalar('training/reward', sum(all_rewards), epoch * len(voc_trainval_loader) + it)
+                writer.add_scalar('training/reward', sum(all_rewards), epoch * len(voc_loader) + it)
 
             if it % args['display_intervals'] == 0:
                 tqdm.write('[{}][{}] rewards {}:{}'.format(epoch, it, sum(all_rewards), all_rewards))
+
+        pr_result, _, all_action_pred = evaluate(dqn, 'test', args, device, (0.3, 0.5, 0.7))
+        for thr in pr_result.keys():
+            print('[IOU threshold]: ', thr)
+            print('Precision: {:.4f}   Recall: {:.4f}'.format(pr_result[thr]['P'], pr_result[thr]['R']))
+        if USE_TB:
+            for thr in pr_result.keys():
+                writer.add_scalar('evaluating/Precision-th-{}'.format(thr), pr_result[thr]['P'], epoch)
+                writer.add_scalar('evaluating/Recall-th-{}'.format(thr), pr_result[thr]['R'], epoch)
 
         save_model(dqn, optimizer, epoch)
 
