@@ -85,7 +85,7 @@ class DQN(nn.Module):
             if random.random() > 0.5:
                 action  = q_value[0, :self.num_actions[0]].argmax().item()
             else:
-                action = q_value[0, -1*self.num_actions[1]:].argmax().item()
+                action = self.num_actions[0] + q_value[0, -1*self.num_actions[1]:].argmax().item()
         else:
             action = random.randrange(self.num_actions[0] + self.num_actions[1])
 

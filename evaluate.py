@@ -67,7 +67,7 @@ def evaluate(dqn, dataset, args, device, IoU_thresholds=(0.5, 0.6, 0.7)):
 
         bbox_pred = list()
         action_pred = list()
-        states_deque = deque()  # breath first search  (tag, unscaled_bbox, history_actions)
+        states_deque = deque()  # breath first search  (unscaled_bbox, history_actions)
         states_deque.append(((0., 0., original_shape[0], original_shape[1]), deque(maxlen=args['max_steps'])))
         num_nodes_to_add = args['max_steps'] - 1
 
@@ -83,7 +83,7 @@ def evaluate(dqn, dataset, args, device, IoU_thresholds=(0.5, 0.6, 0.7)):
 
                 # two branch search
                 scaling_action = q_value[0, :dqn.num_actions[0]].argmax().item()
-                transform_action = q_value[0, -1*dqn.num_actions[1]:].argmax().item()
+                transform_action = dqn.num_actions[0] + q_value[0, -1*dqn.num_actions[1]:].argmax().item()
                 action_pred.append((scaling_action, transform_action))
 
                 next_bbox_s = next_bbox_by_action(cur_bbox, scaling_action, original_shape)

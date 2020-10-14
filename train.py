@@ -47,6 +47,8 @@ def set_args():
     args['total_epochs'] = TOTAL_EPOCH
     args['max_steps'] = 15
     args['replay_capacity'] = 80000  # ~ len(trainval) * 15
+    args['replay_initial'] = 8000
+    args['target_update'] = 500
     args['gamma'] = 0.9
     args['shuffle'] = False  # whether shuffle voc_trainval
     args['epsilon_duration'] = int(TOTAL_EPOCH * 2 / 5) if int(TOTAL_EPOCH * 2 / 5) > 0 else 1
@@ -84,8 +86,13 @@ def train(args):
     dqn = DQN(num_inputs=args['num_inputs'], num_actions=args['num_actions'],
               max_history=args['max_history'], dropout_rate=args['dropout_rate'])
 
+    target_dqn = DQN(num_inputs=args['num_inputs'], num_actions=args['num_actions'],
+                     max_history=args['max_history'], dropout_rate=args['dropout_rate'])
+    target_dqn.load_state_dict(dqn.state_dict())
+
     # move model to GPU before optimizer
     dqn = dqn.to(device)
+    target_dqn = target_dqn.to(device)
 
     optimizer = torch.optim.Adam(dqn.parameters(), lr=args['lr'])
 
@@ -104,7 +111,6 @@ def train(args):
 
     for epoch in range(args['total_epochs']):
 
-        dqn.train()
         epsilon = epsilon_by_epoch(epoch, duration=args['epsilon_duration'])
         if USE_TB:
             writer.add_scalar('training/epsilon', epsilon, epoch)
@@ -122,6 +128,7 @@ def train(args):
             history_actions = deque(maxlen=args['max_steps'])  # deque of int
             hit_flags = [0] * len(bbox_gt_list)  # use 0 instead of -1 in original paper
             all_rewards = list()
+            all_actions = list()
 
             state = (img_tensor, resize_bbox(cur_bbox, scale_factors), history_actions.copy())
 
@@ -139,8 +146,8 @@ def train(args):
 
                 # replay
                 replay_buffer.push(image_idx, state, action, reward, next_state)
-                if len(replay_buffer) > args['batch_size']:
-                    loss = compute_td_loss(dqn, replay_buffer, args['batch_size'], args['gamma'], device)
+                if len(replay_buffer) >= args['replay_initial']:
+                    loss = compute_td_loss(dqn, target_dqn, replay_buffer, args['batch_size'], args['gamma'], device)
                     if USE_TB:
                         writer.add_scalar('training/loss', loss.item(),
                                           (epoch * len(voc_loader) + it) * args['max_steps'] + step)
@@ -151,14 +158,23 @@ def train(args):
                         clip_grad_value_(dqn.parameters(), args['grad_clip'])
                     optimizer.step()
 
+                # state transition
+                state = next_state
+
                 # for display
                 all_rewards.append(reward)
+                all_actions.append(action)
+
+            # update target network
+            if (epoch * len(voc_loader) + it) % args['target_update'] == 0:
+                target_dqn.load_state_dict(dqn.state_dict())
 
             if USE_TB:
                 writer.add_scalar('training/reward', sum(all_rewards), epoch * len(voc_loader) + it)
 
             if it % args['display_intervals'] == 0:
-                tqdm.write('[{}][{}] rewards {}:{}'.format(epoch, it, sum(all_rewards), all_rewards))
+                tqdm.write('[{}][{}] \n rewards {}:{} \n actions {}'.format(epoch, it, sum(all_rewards),
+                                                                            all_rewards, all_actions))
 
         pr_result, _, all_action_pred = evaluate(dqn, 'test', args, device, (0.3, 0.5, 0.7))
         for thr in pr_result.keys():
