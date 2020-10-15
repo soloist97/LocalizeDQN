@@ -27,4 +27,4 @@ def compute_td_loss(dqn, target_dqn, replay_buffer, batch_size, gamma=0.9, devic
     next_q_value = next_q_values.max(dim=-1)[0]
     expected_q_value = reward + gamma * next_q_value
 
-    return F.smooth_l1_loss(q_value, expected_q_value)
+    return F.smooth_l1_loss(q_value, expected_q_value), q_value, expected_q_value

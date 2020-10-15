@@ -1,5 +1,5 @@
 import os, json
-from collections import deque
+from collections import deque, Counter
 
 import torch
 import numpy as np
@@ -125,7 +125,7 @@ def train(args):
 
             cur_bbox = (0., 0., original_shape[0], original_shape[1])
             scale_factors = (224. / original_shape[0], 224. / original_shape[1])
-            history_actions = deque(maxlen=args['max_steps'])  # deque of int
+            history_actions = deque(maxlen=args['max_history'])  # deque of int
             hit_flags = [0] * len(bbox_gt_list)  # use 0 instead of -1 in original paper
             all_rewards = list()
             all_actions = list()
@@ -147,10 +147,15 @@ def train(args):
                 # replay
                 replay_buffer.push(image_idx, state, action, reward, next_state)
                 if len(replay_buffer) >= args['replay_initial']:
-                    loss = compute_td_loss(dqn, target_dqn, replay_buffer, args['batch_size'], args['gamma'], device)
+                    loss, q_value, expected_q_value = compute_td_loss(dqn, target_dqn, replay_buffer,
+                                                                      args['batch_size'], args['gamma'], device)
                     if USE_TB:
                         writer.add_scalar('training/loss', loss.item(),
                                           (epoch * len(voc_loader) + it) * args['max_steps'] + step)
+                        writer.add_histogram('training/q_value', q_value.detach().cpu().numpy(),
+                                            (epoch * len(voc_loader) + it) * args['max_steps'] + step)
+                        writer.add_histogram('training/expected_q_value', expected_q_value.cpu().numpy(),
+                                            (epoch * len(voc_loader) + it) * args['max_steps'] + step)
 
                     optimizer.zero_grad()
                     loss.backward()
@@ -160,6 +165,7 @@ def train(args):
 
                 # state transition
                 state = next_state
+                cur_bbox = next_bbox
 
                 # for display
                 all_rewards.append(reward)
@@ -176,16 +182,23 @@ def train(args):
                 tqdm.write('[{}][{}] \n rewards {}:{} \n actions {}'.format(epoch, it, sum(all_rewards),
                                                                             all_rewards, all_actions))
 
+        save_model(dqn, optimizer, epoch)
+
         pr_result, _, all_action_pred = evaluate(dqn, 'test', args, device, (0.3, 0.5, 0.7))
+
         for thr in pr_result.keys():
             print('[IOU threshold]: ', thr)
             print('Precision: {:.4f}   Recall: {:.4f}'.format(pr_result[thr]['P'], pr_result[thr]['R']))
+
+        print('[Action Pairs]: ')
+        c = Counter([tuple(ap) for aps in all_action_pred for ap in aps])
+        for k, v in c.items():
+            print(k, v)
+
         if USE_TB:
             for thr in pr_result.keys():
                 writer.add_scalar('evaluating/Precision-th-{}'.format(thr), pr_result[thr]['P'], epoch)
                 writer.add_scalar('evaluating/Recall-th-{}'.format(thr), pr_result[thr]['R'], epoch)
-
-        save_model(dqn, optimizer, epoch)
 
     if USE_TB:
         writer.close()
