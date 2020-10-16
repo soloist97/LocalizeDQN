@@ -11,7 +11,7 @@ class ReplayBuffer(object):
         self.tensor_buffer = dict()  # {iid : (1, 3, 224, 224)}
         self.buffer = deque(maxlen=capacity)
 
-    def push(self, iid, state, action, reward, next_state):
+    def push(self, iid, state, action, reward, next_state, done):
         """
 
         :param iid: (int)
@@ -19,6 +19,7 @@ class ReplayBuffer(object):
         :param action: (int)
         :param reward: (float)
         :param next_state: (tuple) (tensor, tuple, deque)
+        :param done: (bool)
         :return:
         """
         assert state[0].shape[0] == 1, "Not support batch input"
@@ -30,11 +31,11 @@ class ReplayBuffer(object):
         state = (iid, state[1], state[2])
         next_state = (iid, next_state[1], next_state[2])
 
-        self.buffer.append((state, action, reward, next_state))
+        self.buffer.append((state, action, reward, next_state, 1 if done else 0))
 
     def sample(self, batch_size, device="cpu"):
 
-        state, action, reward, next_state = zip(*random.sample(self.buffer, batch_size))
+        state, action, reward, next_state, done = zip(*random.sample(self.buffer, batch_size))
 
         iids, bboxes, hs = zip(*state)
         state = (torch.cat([self.tensor_buffer[iid] for iid in iids], dim=0).to(device), list(bboxes), list(hs))
@@ -44,8 +45,9 @@ class ReplayBuffer(object):
 
         action = torch.tensor(action, dtype=torch.long).to(device)
         reward = torch.tensor(reward, dtype=torch.float).to(device)
+        done = torch.tensor(done, dtype=torch.float).to(device)
 
-        return state, action, reward, next_state
+        return state, action, reward, next_state, done
 
     def __len__(self):
         return len(self.buffer)

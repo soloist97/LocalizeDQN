@@ -38,20 +38,19 @@ def set_args():
     args['display_intervals'] = 500
 
     # Model settings
-    args['max_history'] = 15
+    args['max_history'] = 3
     args['num_inputs'] = 1024 * 2 + len(ACTION_FUNC_DICT) * args['max_history']
     args['num_actions'] = (5, 8)
-    args['dropout_rate'] = 0.3
 
     # Training Settings
     args['total_epochs'] = TOTAL_EPOCH
-    args['max_steps'] = 15
-    args['replay_capacity'] = 80000  # ~ len(trainval) * 15
-    args['replay_initial'] = 8000
-    args['target_update'] = 500
+    args['max_steps'] = 3
+    args['replay_capacity'] = 15000  # ~ len(trainval) * 3
+    args['replay_initial'] = 300
+    args['target_update'] = 1000
     args['gamma'] = 0.9
     args['shuffle'] = False  # whether shuffle voc_trainval
-    args['epsilon_duration'] = int(TOTAL_EPOCH * 2 / 5) if int(TOTAL_EPOCH * 2 / 5) > 0 else 1
+    args['epsilon_duration'] = int(TOTAL_EPOCH * 4 / 5)
 
     args['lr'] = 1e-3
     args['batch_size'] = 16
@@ -84,10 +83,10 @@ def train(args):
 
     # === init model ====
     dqn = DQN(num_inputs=args['num_inputs'], num_actions=args['num_actions'],
-              max_history=args['max_history'], dropout_rate=args['dropout_rate'])
+              max_history=args['max_history'])
 
     target_dqn = DQN(num_inputs=args['num_inputs'], num_actions=args['num_actions'],
-                     max_history=args['max_history'], dropout_rate=args['dropout_rate'])
+                     max_history=args['max_history'])
     target_dqn.load_state_dict(dqn.state_dict())
 
     # move model to GPU before optimizer
@@ -145,7 +144,7 @@ def train(args):
                 reward, hit_flags = reward_by_bboxes(cur_bbox, next_bbox, bbox_gt_list, hit_flags)
 
                 # replay
-                replay_buffer.push(image_idx, state, action, reward, next_state)
+                replay_buffer.push(image_idx, state, action, reward, next_state, step == args['max_steps'] - 1)
                 if len(replay_buffer) >= args['replay_initial']:
                     loss, q_value, expected_q_value = compute_td_loss(dqn, target_dqn, replay_buffer,
                                                                       args['batch_size'], args['gamma'], device)

@@ -9,7 +9,7 @@ from model.encoder import VGG16Encoder, RESNET50Encoder
 
 class DQN(nn.Module):
 
-    def __init__(self, num_inputs, num_actions=(5, 8), max_history=50, dropout_rate=0.3):
+    def __init__(self, num_inputs, num_actions=(5, 8), max_history=50):
 
         super(DQN, self).__init__()
 
@@ -18,18 +18,15 @@ class DQN(nn.Module):
         self.num_inputs = num_inputs
         self.num_actions = num_actions  # (scaling_action, local_translation_action)
         self.max_history = max_history
-        self.dropout_rate = dropout_rate
 
         self.encoder = RESNET50Encoder()
 
         # delete few Linear layers for simplicity
         self.layers = nn.Sequential(
             nn.Linear(num_inputs, 1024),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate),
+            nn.SELU(),
             nn.Linear(1024, 512),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate),
+            nn.SELU(),
             nn.Linear(512, num_actions[0] + num_actions[1])
         )
 

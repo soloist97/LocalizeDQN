@@ -77,19 +77,11 @@ class RESNET50Encoder(nn.Module):
 
         convnet = resnet50(pretrained=True)
 
-        self.backbone = nn.Sequential(*list(convnet.children())[:-2])
-        self.pooling = nn.AdaptiveMaxPool2d((1, 1))
+        self.backbone = nn.Sequential(*list(convnet.children())[:-3])  # (bz, 1024, 14, 14)
+        self.pooling = nn.AdaptiveAvgPool2d((1, 1))
         self.flatten = nn.Flatten(start_dim=1)
-        self.global_fc = nn.Sequential(
-            nn.Linear(2048, 1024),
-            nn.ReLU()
-        )
-        self.bbox_fc = nn.Sequential(
-            nn.Linear(2048, 1024),
-            nn.ReLU()
-        )
 
-        self.roi_pool = RoIPool(output_size=(3, 3), spatial_scale=1/32)  #  7/224
+        self.roi_pool = RoIPool(output_size=(7, 7), spatial_scale=1/16)  #  7/224
 
         self.__init()
 
@@ -103,29 +95,27 @@ class RESNET50Encoder(nn.Module):
         """
 
         :param img_tensor: (tensor) shape (batch_size, 3, 224, 224)
-        :return: (batch_size, 1024) (batch_size, 2048, 7, 7)
+        :return: (batch_size, 1024) (batch_size, 1024, 14, 14)
         """
 
         feature_map = self.backbone(img_tensor)
         x = self.pooling(feature_map)
-        x = self.flatten(x)
-        global_feature = self.global_fc(x)
+        global_feature = self.flatten(x)
 
         return global_feature, feature_map
 
     def encode_bbox(self, feature_map, scaled_bbox):
         """
 
-        :param feature_map: (tensor) (batch_size, 2048, 7, 7)
+        :param feature_map: (tensor) (batch_size, 1024, 14, 14)
         :param scaled_bbox: (list[tuple]) [(xmin, ymin, xmax, ymax), ...]
-        :return: (batch_size, 2048)
+        :return: (batch_size, 1024)
         """
 
         roi = [torch.tensor([box], dtype=torch.float).to(feature_map.device) for box in scaled_bbox]  # [(1, 4), ...]
 
         bbox_map = self.roi_pool(feature_map, roi)
         x = self.pooling(bbox_map)
-        x = self.flatten(x)
-        bbox_feature = self.bbox_fc(x)
+        bbox_feature = self.flatten(x)
 
         return bbox_feature

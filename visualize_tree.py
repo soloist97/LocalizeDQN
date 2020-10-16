@@ -49,6 +49,10 @@ def visualize_tree(args):
                     bbox_img = img.copy()
                     draw = ImageDraw.Draw(bbox_img)
                     draw.rectangle(bboxes_pred[2 ** r + c - 1], outline='red', width=5)
+                    if 2 ** r + c - 1 == 0: # add ground truth to root
+                        for bbox_gt in bboxes_gt:
+                            draw.rectangle(bbox_gt.tolist(), outline='blue', width=5)
+
                     ax.imshow(bbox_img)
 
         fig.suptitle('bbox Tree')

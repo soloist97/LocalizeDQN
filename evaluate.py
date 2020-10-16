@@ -22,7 +22,7 @@ def load_model(args):
 
     # === init model ====
     dqn = DQN(num_inputs=args['num_inputs'], num_actions=tuple(args['num_actions']),
-              max_history=args['max_history'], dropout_rate=args['dropout_rate'])
+              max_history=args['max_history'])
 
     model_checkpoint_path = os.path.join(args['model_root_path'], args['model_name'], args['model_check_point'])
 
@@ -69,7 +69,7 @@ def evaluate(dqn, dataset, args, device, IoU_thresholds=(0.5, 0.6, 0.7)):
         action_pred = list()
         states_deque = deque()  # breath first search  (unscaled_bbox, history_actions)
         states_deque.append(((0., 0., original_shape[0], original_shape[1]), deque(maxlen=args['max_steps'])))
-        num_nodes_to_add = args['max_steps'] - 1
+        num_nodes_to_add = 2**(args['max_steps'] + 1) - 2
 
         while(len(states_deque) != 0):
 
