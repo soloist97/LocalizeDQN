@@ -8,8 +8,8 @@ from torch.nn.utils.clip_grad import clip_grad_value_
 from tqdm import tqdm
 
 from model.dqn import DQN
-from dataloader import DataLoaderPFG, VOCLocalization
-from utils.bbox import ACTION_FUNC_DICT, next_bbox_by_action, resize_bbox
+from dataloader import DataLoaderPFG, VOCLocalization, CombinedDataset
+from utils.bbox import next_bbox_by_action, resize_bbox
 from utils.loss import compute_td_loss
 from utils.explore import epsilon_by_epoch
 from utils.replay import ReplayBuffer
@@ -35,17 +35,17 @@ def set_args():
     # General settings
     args['model_name'] = MODEL_NAME
     args['voc2007_path'] = './data/voc2007'
+    args['voc2012_path'] = './data/voc2012'
     args['display_intervals'] = 500
 
     # Model settings
     args['max_history'] = 3
-    args['num_inputs'] = 1024 * 2 + len(ACTION_FUNC_DICT) * args['max_history']
     args['num_actions'] = (5, 8)
 
     # Training Settings
     args['total_epochs'] = TOTAL_EPOCH
     args['max_steps'] = 3
-    args['replay_capacity'] = 15000  # ~ len(trainval) * 3
+    args['replay_capacity'] = 48000  # ~ len(trainval) * 3
     args['replay_initial'] = 300
     args['target_update'] = 1000
     args['gamma'] = 0.9
@@ -82,11 +82,9 @@ def train(args):
     print('[INFO]: Model {} start training...'.format(MODEL_NAME))
 
     # === init model ====
-    dqn = DQN(num_inputs=args['num_inputs'], num_actions=args['num_actions'],
-              max_history=args['max_history'])
+    dqn = DQN(num_actions=args['num_actions'], max_history=args['max_history'])
 
-    target_dqn = DQN(num_inputs=args['num_inputs'], num_actions=args['num_actions'],
-                     max_history=args['max_history'])
+    target_dqn = DQN(num_actions=args['num_actions'], max_history=args['max_history'])
     target_dqn.load_state_dict(dqn.state_dict())
 
     # move model to GPU before optimizer
@@ -95,9 +93,12 @@ def train(args):
 
     optimizer = torch.optim.Adam(dqn.parameters(), lr=args['lr'])
 
-    # === prepare data loader ====
-    voc_loader = DataLoaderPFG(VOCLocalization(args['voc2007_path'], year='2007', image_set='trainval',
-                                               download=False, transform=VOCLocalization.get_transform()),
+    # === prepare data loader ===
+    voc_loader = DataLoaderPFG(CombinedDataset(
+                                    VOCLocalization(args['voc2007_path'], year='2007', image_set='trainval',
+                                                   download=False, transform=VOCLocalization.get_transform()),
+                                    VOCLocalization(args['voc2012_path'], year='2012', image_set='trainval',
+                                                    download=False, transform=VOCLocalization.get_transform())),
                                 batch_size=1, shuffle=args['shuffle'], num_workers=1, pin_memory=True,
                                 collate_fn=VOCLocalization.collate_fn)
 
@@ -129,7 +130,7 @@ def train(args):
             all_rewards = list()
             all_actions = list()
 
-            state = (img_tensor, resize_bbox(cur_bbox, scale_factors), history_actions.copy())
+            state = (img_tensor, resize_bbox(cur_bbox, scale_factors), history_actions)
 
             for step in range(args['max_steps']):
 
@@ -146,15 +147,10 @@ def train(args):
                 # replay
                 replay_buffer.push(image_idx, state, action, reward, next_state, step == args['max_steps'] - 1)
                 if len(replay_buffer) >= args['replay_initial']:
-                    loss, q_value, expected_q_value = compute_td_loss(dqn, target_dqn, replay_buffer,
-                                                                      args['batch_size'], args['gamma'], device)
+                    loss = compute_td_loss(dqn, target_dqn, replay_buffer, args['batch_size'], args['gamma'], device)
                     if USE_TB:
                         writer.add_scalar('training/loss', loss.item(),
                                           (epoch * len(voc_loader) + it) * args['max_steps'] + step)
-                        writer.add_histogram('training/q_value', q_value.detach().cpu().numpy(),
-                                            (epoch * len(voc_loader) + it) * args['max_steps'] + step)
-                        writer.add_histogram('training/expected_q_value', expected_q_value.cpu().numpy(),
-                                            (epoch * len(voc_loader) + it) * args['max_steps'] + step)
 
                     optimizer.zero_grad()
                     loss.backward()

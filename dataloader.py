@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as transforms
 from torchvision.datasets import VOCDetection
 from prefetch_generator import BackgroundGenerator
@@ -63,3 +63,23 @@ class VOCLocalization(VOCDetection):
             object_bbox_list.append(torch.tensor(bbox, dtype=torch.float))
 
         return data_tuple[0], original_shape, object_bbox_list, index
+
+
+class CombinedDataset(Dataset):
+
+    def __init__(self, *datasets):
+
+        self.datasets = datasets
+
+    def __getitem__(self, index):
+
+        i = index
+        for d in self.datasets:
+            if i < len(d):
+                return (*d.__getitem__(i)[:-1], index)
+            else:
+                i -= len(d)
+
+    def __len__(self):
+
+        return sum(len(d) for d in self.datasets)

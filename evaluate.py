@@ -21,8 +21,7 @@ def load_config_args(args):
 def load_model(args):
 
     # === init model ====
-    dqn = DQN(num_inputs=args['num_inputs'], num_actions=tuple(args['num_actions']),
-              max_history=args['max_history'])
+    dqn = DQN(num_actions=tuple(args['num_actions']), max_history=args['max_history'])
 
     model_checkpoint_path = os.path.join(args['model_root_path'], args['model_name'], args['model_check_point'])
 
@@ -58,7 +57,7 @@ def evaluate(dqn, dataset, args, device, IoU_thresholds=(0.5, 0.6, 0.7)):
     for img_tensor, original_shape, bbox_gt_list, _ in tqdm(voc_loader, total=len(voc_loader)):
 
         img_tensor = img_tensor.to(device)
-        global_feature, feature_map = dqn.encoder(img_tensor)
+        feature_map = dqn.encoder.encode_image(img_tensor)
 
         original_shape = original_shape[0]
         bbox_gt_list = bbox_gt_list[0]
@@ -78,8 +77,7 @@ def evaluate(dqn, dataset, args, device, IoU_thresholds=(0.5, 0.6, 0.7)):
 
             if num_nodes_to_add > 0:
 
-                q_value = dqn((img_tensor, resize_bbox(cur_bbox, scale_factors), history_actions),
-                              global_feature, feature_map)
+                q_value = dqn((feature_map, resize_bbox(cur_bbox, scale_factors), history_actions))
 
                 # two branch search
                 scaling_action = q_value[0, :dqn.num_actions[0]].argmax().item()
