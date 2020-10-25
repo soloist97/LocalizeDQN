@@ -24,11 +24,9 @@ class DQN(nn.Module):
         self.num_inputs = self.encoder.num_outputs * 2 + (num_actions[0] + num_actions[1]) * max_history
         self.layers = nn.Sequential(
             nn.Linear(self.num_inputs, 1024),
-            nn.SELU(),
-            nn.Linear(1024, 1024),
-            nn.SELU(),
+            nn.ReLU(),
             nn.Linear(1024, 512),
-            nn.SELU(),
+            nn.ReLU(),
             nn.Linear(512, num_actions[0] + num_actions[1])
         )
 

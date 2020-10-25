@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from model.dqn import DQN
 from dataloader import DataLoaderPFG, VOCLocalization, CombinedDataset
-from utils.bbox import next_bbox_by_action, resize_bbox
+from utils.bbox import next_bbox_by_action
 from utils.loss import compute_td_loss
 from utils.explore import epsilon_by_epoch
 from utils.replay import ReplayBuffer
@@ -24,7 +24,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 USE_TB = False
 CONFIG_PATH = './model_params'
-MODEL_NAME = 'debug'
+MODEL_NAME = 'debug_ratio'
 TOTAL_EPOCH = 10
 
 
@@ -35,8 +35,8 @@ def set_args():
     # General settings
     args['model_name'] = MODEL_NAME
     args['voc2007_path'] = './data/voc2007'
-    args['voc2012_path'] = './data/voc2012'
     args['display_intervals'] = 500
+    args['max_size'] = 500  # longest edge
 
     # Model settings
     args['max_history'] = 3
@@ -44,15 +44,15 @@ def set_args():
 
     # Training Settings
     args['total_epochs'] = TOTAL_EPOCH
-    args['max_steps'] = 3
-    args['replay_capacity'] = 48000  # ~ len(trainval) * 3
-    args['replay_initial'] = 300
-    args['target_update'] = 1000
+    args['max_steps'] = 15
+    args['replay_capacity'] = 80000  # ~ len(trainval) * 3
+    args['replay_initial'] = 3000
+    args['target_update'] = 1  # epochs
     args['gamma'] = 0.9
     args['shuffle'] = False  # whether shuffle voc_trainval
-    args['epsilon_duration'] = int(TOTAL_EPOCH * 4 / 5)
+    args['epsilon_duration'] = 8
 
-    args['lr'] = 1e-3
+    args['lr'] = 3e-4
     args['batch_size'] = 16
     args['grad_clip'] = 1.
 
@@ -91,14 +91,11 @@ def train(args):
     dqn = dqn.to(device)
     target_dqn = target_dqn.to(device)
 
-    optimizer = torch.optim.Adam(dqn.parameters(), lr=args['lr'])
+    optimizer = torch.optim.RMSprop(dqn.parameters(), lr=args['lr'])
 
     # === prepare data loader ===
-    voc_loader = DataLoaderPFG(CombinedDataset(
-                                    VOCLocalization(args['voc2007_path'], year='2007', image_set='trainval',
-                                                   download=False, transform=VOCLocalization.get_transform()),
-                                    VOCLocalization(args['voc2012_path'], year='2012', image_set='trainval',
-                                                    download=False, transform=VOCLocalization.get_transform())),
+    voc_loader = DataLoaderPFG(VOCLocalization(args['voc2007_path'], year='2007', image_set='trainval', download=False,
+                                               transform=VOCLocalization.transform_for_tensor(args['max_size'])),
                                 batch_size=1, shuffle=args['shuffle'], num_workers=1, pin_memory=True,
                                 collate_fn=VOCLocalization.collate_fn)
 
@@ -112,25 +109,27 @@ def train(args):
     for epoch in range(args['total_epochs']):
 
         epsilon = epsilon_by_epoch(epoch, duration=args['epsilon_duration'])
+        # update target network
+        if epoch > 0 and epoch % args['target_update'] == 0:
+            print('[INFO]: update target dqn')
+            target_dqn.load_state_dict(dqn.state_dict())
         if USE_TB:
             writer.add_scalar('training/epsilon', epsilon, epoch)
 
-        for it, (img_tensor, original_shape, bbox_gt_list, image_idx) in tqdm(enumerate(voc_loader),
-                                                                              total=len(voc_loader)):
+        for it, (img_tensor, img_shape, bbox_gt_list, image_idx) in tqdm(enumerate(voc_loader), total=len(voc_loader)):
 
             img_tensor = img_tensor.to(device)
-            original_shape = original_shape[0]
+            img_shape = img_shape[0]
             bbox_gt_list = bbox_gt_list[0]
             image_idx = image_idx[0]
 
-            cur_bbox = (0., 0., original_shape[0], original_shape[1])
-            scale_factors = (224. / original_shape[0], 224. / original_shape[1])
+            cur_bbox = (0., 0., img_shape[0], img_shape[1])
             history_actions = deque(maxlen=args['max_history'])  # deque of int
             hit_flags = [0] * len(bbox_gt_list)  # use 0 instead of -1 in original paper
             all_rewards = list()
             all_actions = list()
 
-            state = (img_tensor, resize_bbox(cur_bbox, scale_factors), history_actions)
+            state = (img_tensor, cur_bbox, history_actions)
 
             for step in range(args['max_steps']):
 
@@ -138,10 +137,10 @@ def train(args):
                 action = dqn.act(state, epsilon)
 
                 # environment
-                next_bbox = next_bbox_by_action(cur_bbox, action, original_shape)
+                next_bbox = next_bbox_by_action(cur_bbox, action, img_shape)
                 history_actions.append(action)
 
-                next_state = (img_tensor, resize_bbox(next_bbox, scale_factors), history_actions.copy())
+                next_state = (img_tensor, next_bbox, history_actions.copy())
                 reward, hit_flags = reward_by_bboxes(cur_bbox, next_bbox, bbox_gt_list, hit_flags)
 
                 # replay
@@ -165,10 +164,6 @@ def train(args):
                 # for display
                 all_rewards.append(reward)
                 all_actions.append(action)
-
-            # update target network
-            if (epoch * len(voc_loader) + it) % args['target_update'] == 0:
-                target_dqn.load_state_dict(dqn.state_dict())
 
             if USE_TB:
                 writer.add_scalar('training/reward', sum(all_rewards), epoch * len(voc_loader) + it)

@@ -1,8 +1,12 @@
+import math
+
 import torch
 from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as transforms
 from torchvision.datasets import VOCDetection
 from prefetch_generator import BackgroundGenerator
+
+from PIL import Image
 
 
 class DataLoaderPFG(DataLoader):
@@ -14,17 +18,58 @@ class DataLoaderPFG(DataLoader):
         return BackgroundGenerator(super().__iter__())
 
 
+class Resize(object):
+    """Resize the longest edge of input PIL Image to given size and keep the ratio of the image
+
+    Args:
+        max_size (int): expected max_size of the longest edge
+        interpolation (int, optional): Desired interpolation. Default is
+            ``PIL.Image.BILINEAR``
+    """
+
+    def __init__(self, max_size, interpolation=Image.BILINEAR):
+
+        assert isinstance(max_size, int)
+
+        self.max_size = max_size
+        self.interpolation = interpolation
+
+    def __call__(self, img):
+        """
+        Args:
+            img (PIL Image): Image to be scaled.
+
+        Returns:
+            PIL Image: Rescaled image.
+        """
+
+        width, height = img.size
+        if width > height:
+            size = (self.max_size, int(height * self.max_size / width))
+        else:
+            size = (int(width * self.max_size / height), self.max_size)
+
+        return img.resize(size, self.interpolation)
+
+
 class VOCLocalization(VOCDetection):
 
     @staticmethod
-    def get_transform():
-        """More complicated transform utils in torchvison/references/detection/transforms.py
-        """
+    def transform_for_tensor(max_size):
 
         transform = transforms.Compose([
-            transforms.Resize((224, 224)),
+            Resize(max_size),
             transforms.ToTensor(),  # (C, H, W) between [0, 1]
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+
+        return transform
+
+    @staticmethod
+    def transform_for_img(max_size):
+
+        transform = transforms.Compose([
+            Resize(max_size)
         ])
 
         return transform
@@ -34,8 +79,13 @@ class VOCLocalization(VOCDetection):
         """Use in torch.utils.data.DataLoader
         """
 
+        N = max(batch[0][0].shape[-2:])
+        padded_tensor = torch.zeros(len(batch), batch[0][0].shape[-3], N, N, dtype=batch[0][0].dtype)
+        for i, b in enumerate(batch):
+            C, H, W = b[0].shape
+            padded_tensor[i, :C, :H, :W] = b[0]
         # stack first tensors, add rests to their correspond lists
-        return (torch.stack([b[0] for b in batch], dim=0),) + tuple(zip(*[b[1:] for b in batch]))
+        return (padded_tensor,) + tuple(zip(*[b[1:] for b in batch]))
 
     def __init__(self, *args, **kwargs):
 
@@ -45,10 +95,13 @@ class VOCLocalization(VOCDetection):
 
         data_tuple = super(VOCLocalization, self).__getitem__(index)  # (image, xml-dict)
 
-        original_shape = (
-            float(data_tuple[1]['annotation']['size']['width']),
-            float(data_tuple[1]['annotation']['size']['height']),
-        )
+        w = float(data_tuple[1]['annotation']['size']['width'])
+        h = float(data_tuple[1]['annotation']['size']['height'])
+
+        if isinstance(data_tuple[0], torch.Tensor):
+            _, hs, ws = data_tuple[0].shape  # (C, H, W)
+        else:
+            ws, hs = data_tuple[0].size  # (W, H)
 
         object_bbox_list = list()
 
@@ -58,11 +111,13 @@ class VOCLocalization(VOCDetection):
             all_objects = [data_tuple[1]['annotation']['object']]
 
         for object in all_objects:
-            bbox = [float(object['bndbox']['xmin']), float(object['bndbox']['ymin']),
-                    float(object['bndbox']['xmax']), float(object['bndbox']['ymax'])]
+            bbox = [float(math.floor(float(object['bndbox']['xmin']) * ws / w)),
+                    float(math.floor(float(object['bndbox']['ymin']) * hs / h)),
+                    float(math.floor(float(object['bndbox']['xmax']) * ws / w)),
+                    float(math.floor(float(object['bndbox']['ymax']) * hs / h))]
             object_bbox_list.append(torch.tensor(bbox, dtype=torch.float))
 
-        return data_tuple[0], original_shape, object_bbox_list, index
+        return data_tuple[0], (ws, hs), object_bbox_list, index
 
 
 class CombinedDataset(Dataset):

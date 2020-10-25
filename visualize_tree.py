@@ -12,11 +12,12 @@ from dataloader import VOCLocalization
 
 def visualize_tree(args):
 
-    print('[INFO]: visualizing {} images of {} on {} set'.format('all' if args['num_images'] > 0 else args['num_images'],
+    print('[INFO]: visualizing {} images of {} on {} set'.format(args['num_images'] if args['num_images'] > 0 else 'all',
                                                                   args['json_path'], args['dataset']))
 
     # dataset
-    voc_loader = VOCLocalization(args['voc_path'], year='2007', image_set=args['dataset'], download=False)
+    voc_loader = VOCLocalization(args['voc_path'], year='2007', image_set=args['dataset'], download=False,
+                                 transform=VOCLocalization.transform_for_img(args['max_size']))
 
     # result json
     with open(args['json_path'], 'r') as f:
@@ -64,6 +65,8 @@ def visualize_tree(args):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
+    parser.add_argument("--max_size", type=int,
+                        help="longest edge of the image")
     parser.add_argument("--json_path", type=str, help="the path of result json")
     parser.add_argument("--voc_path", type=str, default="./data/voc2007",
                         help="the root directory of data")

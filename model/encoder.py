@@ -77,7 +77,7 @@ class RESNET50Encoder(nn.Module):
 
         convnet = resnet50(pretrained=True)
 
-        self.backbone = nn.Sequential(*list(convnet.children())[:-3])  # (bz, 1024, 14, 14)
+        self.backbone = nn.Sequential(*list(convnet.children())[:-3])  # (bz, 1024, max_size, max_size)
         self.pooling = nn.AdaptiveAvgPool2d((1, 1))
         self.flatten = nn.Flatten(start_dim=1)
 
@@ -95,7 +95,7 @@ class RESNET50Encoder(nn.Module):
     def forward(self, input_, scaled_bbox):
         """
 
-        :param img_tensor: (tensor) shape (batch_size, 3, 224, 224)
+        :param img_tensor: (tensor) shape (batch_size, 3, max_size, max_size)
         :param scaled_bbox: (list[tuple]) [(xmin, ymin, xmax, ymax), ...]
         :return: (batch_size, 1024) (batch_size, 1024)
         """
@@ -113,8 +113,8 @@ class RESNET50Encoder(nn.Module):
     def encode_image(self, img_tensor):
         """
 
-        :param img_tensor: (tensor) shape (batch_size, 3, 224, 224)
-        :return: (batch_size, 1024) (batch_size, 1024, 14, 14)
+        :param img_tensor: (tensor) shape (batch_size, 3, max_size, max_size)
+        :return: (batch_size, 1024) (batch_size, 1024, max_size/16, max_size/16)
         """
 
         feature_map = self.backbone(img_tensor)
@@ -124,7 +124,7 @@ class RESNET50Encoder(nn.Module):
     def encode_bbox(self, feature_map, scaled_bbox):
         """
 
-        :param feature_map: (tensor) (batch_size, 1024, 14, 14)
+        :param feature_map: (tensor) (batch_size, 1024, max_size/16, max_size/16)
         :param scaled_bbox: (list[tuple]) [(xmin, ymin, xmax, ymax), ...]
         :return: (batch_size, 1024)
         """

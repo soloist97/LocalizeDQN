@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 from model.dqn import DQN
 from dataloader import DataLoaderPFG, VOCLocalization
-from utils.bbox import next_bbox_by_action, resize_bbox
+from utils.bbox import next_bbox_by_action
 from utils.metric import bboxPrecisionRecall
 
 
@@ -42,8 +42,8 @@ def evaluate(dqn, dataset, args, device, IoU_thresholds=(0.5, 0.6, 0.7)):
     dqn.eval()
 
     # === prepare data loader ====
-    voc_loader = DataLoaderPFG(VOCLocalization(args['voc2007_path'], year='2007', image_set=dataset,
-                                               download=False, transform=VOCLocalization.get_transform()),
+    voc_loader = DataLoaderPFG(VOCLocalization(args['voc2007_path'], year='2007', image_set=dataset, download=False,
+                                               transform=VOCLocalization.transform_for_tensor(args['max_size'])),
                                         batch_size=1, shuffle=False, num_workers=1, pin_memory=True,
                                         collate_fn=VOCLocalization.collate_fn)
 
@@ -54,21 +54,19 @@ def evaluate(dqn, dataset, args, device, IoU_thresholds=(0.5, 0.6, 0.7)):
 
     all_bbox_pred = list()
     all_action_pred = list()
-    for img_tensor, original_shape, bbox_gt_list, _ in tqdm(voc_loader, total=len(voc_loader)):
+    for img_tensor, img_shape, bbox_gt_list, _ in tqdm(voc_loader, total=len(voc_loader)):
 
         img_tensor = img_tensor.to(device)
         feature_map = dqn.encoder.encode_image(img_tensor)
 
-        original_shape = original_shape[0]
+        img_shape = img_shape[0]
         bbox_gt_list = bbox_gt_list[0]
-
-        scale_factors = (224. / original_shape[0], 224. / original_shape[1])
 
         bbox_pred = list()
         action_pred = list()
-        states_deque = deque()  # breath first search  (unscaled_bbox, history_actions)
-        states_deque.append(((0., 0., original_shape[0], original_shape[1]), deque(maxlen=args['max_steps'])))
-        num_nodes_to_add = 2**(args['max_steps'] + 1) - 2
+        states_deque = deque()  # breath first search  (bbox, history_actions)
+        states_deque.append(((0., 0., img_shape[0], img_shape[1]), deque(maxlen=args['max_history'])))
+        num_nodes_to_add = 2**(args['max_history'] + 1) - 2
 
         while(len(states_deque) != 0):
 
@@ -77,18 +75,18 @@ def evaluate(dqn, dataset, args, device, IoU_thresholds=(0.5, 0.6, 0.7)):
 
             if num_nodes_to_add > 0:
 
-                q_value = dqn((feature_map, resize_bbox(cur_bbox, scale_factors), history_actions))
+                q_value = dqn((feature_map, cur_bbox, history_actions))
 
                 # two branch search
                 scaling_action = q_value[0, :dqn.num_actions[0]].argmax().item()
                 transform_action = dqn.num_actions[0] + q_value[0, -1*dqn.num_actions[1]:].argmax().item()
                 action_pred.append((scaling_action, transform_action))
 
-                next_bbox_s = next_bbox_by_action(cur_bbox, scaling_action, original_shape)
+                next_bbox_s = next_bbox_by_action(cur_bbox, scaling_action, img_shape)
                 history_actions_s = history_actions.copy()
                 history_actions_s.append(scaling_action)
 
-                next_bbox_t = next_bbox_by_action(cur_bbox, transform_action, original_shape)
+                next_bbox_t = next_bbox_by_action(cur_bbox, transform_action, img_shape)
                 history_actions_t = history_actions.copy()
                 history_actions_t.append(transform_action)
 
