@@ -1,4 +1,6 @@
-import math
+import math, pickle
+
+import h5py
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -118,6 +120,56 @@ class VOCLocalization(VOCDetection):
             object_bbox_list.append(torch.tensor(bbox, dtype=torch.float))
 
         return data_tuple[0], (ws, hs), object_bbox_list, index
+
+
+class FastVOCLocalization(Dataset):
+
+    @staticmethod
+    def collate_fn(batch):
+        """Use in torch.utils.data.DataLoader
+        """
+
+        return list(zip(*batch))
+
+
+    def __init__(self, feature_map_path, img_info_path, fm_to_memory=False):
+
+        super(FastVOCLocalization, self).__init__()
+
+        if fm_to_memory:
+            print('[INFO]: load feature map {} into memory...'.format(feature_map_path))
+            self.feature_map = torch.tensor(h5py.File(feature_map_path, 'r')['feat'][:], dtype=torch.float)
+        else:
+            self.feature_map = feature_map_path
+        self.img_info = pickle.load(open(img_info_path, 'rb'))
+
+    def __getitem__(self, index):
+
+
+        bbox_gt = [torch.tensor(bbox, dtype=torch.float) for  bbox in self.img_info['gt_bbox'][index]]
+
+        return index, self.img_info['shape'][index], bbox_gt
+
+    def __len__(self):
+
+        return len(self.img_info['gt_bbox'])
+
+    def get_feature_map(self, index):
+
+        if isinstance(index, int):
+            index = [index]
+        elif isinstance(index, torch.Tensor):
+            index = index.tolist()
+
+        if isinstance(self.feature_map, str):  # slower but less memory
+            with h5py.File(self.feature_map, 'r') as fm:
+                all_feature_map = [torch.tensor(fm['feat'][idx], dtype=torch.float) for idx in index]
+
+            return torch.stack(all_feature_map, dim=0)
+        else:  # faster but much more memory
+            index = torch.tensor(index, dtype=torch.long)
+
+            return self.feature_map[index]
 
 
 class CombinedDataset(Dataset):

@@ -8,7 +8,7 @@ from torch.nn.utils.clip_grad import clip_grad_value_
 from tqdm import tqdm
 
 from model.dqn import DQN
-from dataloader import DataLoaderPFG, VOCLocalization, CombinedDataset
+from dataloader import DataLoaderPFG, FastVOCLocalization
 from utils.bbox import next_bbox_by_action
 from utils.loss import compute_td_loss
 from utils.explore import epsilon_by_epoch
@@ -35,6 +35,15 @@ def set_args():
     # General settings
     args['model_name'] = MODEL_NAME
     args['voc2007_path'] = './data/voc2007'
+    args['feature_map_path'] = {
+        'trainval': './data/feature_map_2007_trainval.h5',
+        'test': './data/feature_map_2007_test.h5'
+    }
+    args['img_info_path'] = {
+        'trainval': './data/img_info_2007_trainval.pkl',
+        'test': './data/img_info_2007_test.pkl'
+    }
+    args['fm_to_memory'] = True
     args['display_intervals'] = 500
     args['max_size'] = 500  # longest edge
 
@@ -45,7 +54,7 @@ def set_args():
     # Training Settings
     args['total_epochs'] = TOTAL_EPOCH
     args['max_steps'] = 15
-    args['replay_capacity'] = 80000  # ~ len(trainval) * 3
+    args['replay_capacity'] = 80000  # ~ len(trainval) * 16
     args['replay_initial'] = 3000
     args['target_update'] = 1  # epochs
     args['gamma'] = 0.9
@@ -94,17 +103,20 @@ def train(args):
     optimizer = torch.optim.RMSprop(dqn.parameters(), lr=args['lr'])
 
     # === prepare data loader ===
-    voc_loader = DataLoaderPFG(VOCLocalization(args['voc2007_path'], year='2007', image_set='trainval', download=False,
-                                               transform=VOCLocalization.transform_for_tensor(args['max_size'])),
-                                batch_size=1, shuffle=args['shuffle'], num_workers=1, pin_memory=True,
-                                collate_fn=VOCLocalization.collate_fn)
+    voc_dataset = FastVOCLocalization(args['feature_map_path']['trainval'], args['img_info_path']['trainval'],
+                                      args['fm_to_memory'])
+    voc_loader = DataLoaderPFG(
+                    voc_dataset,
+                    batch_size=1, shuffle=args['shuffle'], num_workers=1, pin_memory=True,
+                    collate_fn=FastVOCLocalization.collate_fn
+                 )
 
     # use tensorboard to track the loss
     if USE_TB:
         writer = SummaryWriter()
 
     # === start ====
-    replay_buffer = ReplayBuffer(args['replay_capacity'])
+    replay_buffer = ReplayBuffer(args['replay_capacity'], voc_dataset)
 
     for epoch in range(args['total_epochs']):
 
@@ -116,9 +128,9 @@ def train(args):
         if USE_TB:
             writer.add_scalar('training/epsilon', epsilon, epoch)
 
-        for it, (img_tensor, img_shape, bbox_gt_list, image_idx) in tqdm(enumerate(voc_loader), total=len(voc_loader)):
+        for it, (image_idx, img_shape, bbox_gt_list) in tqdm(enumerate(voc_loader), total=len(voc_loader)):
 
-            img_tensor = img_tensor.to(device)
+            feature_map = voc_dataset.get_feature_map(image_idx).to(device)
             img_shape = img_shape[0]
             bbox_gt_list = bbox_gt_list[0]
             image_idx = image_idx[0]
@@ -129,22 +141,22 @@ def train(args):
             all_rewards = list()
             all_actions = list()
 
-            state = (img_tensor, cur_bbox, history_actions)
+            state = (image_idx, cur_bbox, history_actions)
 
             for step in range(args['max_steps']):
 
                 # agent
-                action = dqn.act(state, epsilon)
+                action = dqn.act((feature_map, *state[1:]), epsilon)
 
                 # environment
                 next_bbox = next_bbox_by_action(cur_bbox, action, img_shape)
                 history_actions.append(action)
 
-                next_state = (img_tensor, next_bbox, history_actions.copy())
+                next_state = (image_idx, next_bbox, history_actions.copy())
                 reward, hit_flags = reward_by_bboxes(cur_bbox, next_bbox, bbox_gt_list, hit_flags)
 
                 # replay
-                replay_buffer.push(image_idx, state, action, reward, next_state, step == args['max_steps'] - 1)
+                replay_buffer.push(state, action, reward, next_state, step == args['max_steps'] - 1)
                 if len(replay_buffer) >= args['replay_initial']:
                     loss = compute_td_loss(dqn, target_dqn, replay_buffer, args['batch_size'], args['gamma'], device)
                     if USE_TB:

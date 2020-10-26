@@ -76,13 +76,14 @@ class RESNET50Encoder(nn.Module):
         super(RESNET50Encoder, self).__init__()
 
         convnet = resnet50(pretrained=True)
+        self.num_outputs = 1024  # FIXED
+        self.spatial_scale = 1/16
 
         self.backbone = nn.Sequential(*list(convnet.children())[:-3])  # (bz, 1024, max_size, max_size)
         self.pooling = nn.AdaptiveAvgPool2d((1, 1))
         self.flatten = nn.Flatten(start_dim=1)
 
-        self.roi_pool = RoIPool(output_size=(7, 7), spatial_scale=1/16)  #  7/224
-        self.num_outputs = 1024
+        self.roi_pool = RoIPool(output_size=(7, 7), spatial_scale=self.spatial_scale)  #  7/224
 
         self.__init()
 

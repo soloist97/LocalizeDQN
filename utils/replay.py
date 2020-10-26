@@ -6,30 +6,22 @@ import torch
 
 class ReplayBuffer(object):
 
-    def __init__(self, capacity):
+    def __init__(self, capacity, dataset):
 
-        self.tensor_buffer = dict()  # {iid : (1, 3, 224, 224)}
+        self.dataset = dataset
         self.buffer = deque(maxlen=capacity)
 
-    def push(self, iid, state, action, reward, next_state, done):
+    def push(self, state, action, reward, next_state, done):
         """
 
-        :param iid: (int)
-        :param state: (tuple) (tensor, tuple, deque)
+        :param state: (tuple) (index, tuple, deque)
         :param action: (int)
         :param reward: (float)
-        :param next_state: (tuple) (tensor, tuple, deque)
+        :param next_state: (tuple) (index, tuple, deque)
         :param done: (bool)
         :return:
         """
-        assert state[0].shape[0] == 1, "Not support batch input"
-
-        # save memory
-        if iid not in self.tensor_buffer.keys():
-            self.tensor_buffer[iid] = state[0].cpu()
-
-        state = (iid, state[1], state[2])
-        next_state = (iid, next_state[1], next_state[2])
+        assert isinstance(state[0], int), "Not support batch input"
 
         self.buffer.append((state, action, reward, next_state, 1 if done else 0))
 
@@ -38,7 +30,7 @@ class ReplayBuffer(object):
         state, action, reward, next_state, done = zip(*random.sample(self.buffer, batch_size))
 
         iids, bboxes, hs = zip(*state)
-        state = (torch.cat([self.tensor_buffer[iid] for iid in iids], dim=0).to(device), list(bboxes), list(hs))
+        state = (self.dataset.get_feature_map(iids).to(device), list(bboxes), list(hs))
 
         _, bboxes, hs = zip(*next_state)
         next_state = (state[0].clone(), list(bboxes), list(hs))

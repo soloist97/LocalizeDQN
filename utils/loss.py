@@ -19,11 +19,9 @@ def compute_td_loss(dqn, target_dqn, replay_buffer, batch_size, gamma=0.9, devic
 
     state, action, reward, next_state, done = replay_buffer.sample(batch_size, device)
 
-    feature_map = dqn.encoder.encode_image(state[0])
-
-    q_values = dqn((feature_map, *state[1:]))  # (batch_size, num_actions)
+    q_values = dqn(state)  # (batch_size, num_actions)
     with torch.no_grad():
-        next_q_values = target_dqn((feature_map.detach(), *next_state[1:])).detach()  # no gradient along this path
+        next_q_values = target_dqn(next_state).detach()  # no gradient along this path
 
     q_value = q_values[torch.arange(batch_size), action]  # (batch_size, )
     next_q_value = next_q_values.max(dim=-1)[0]
