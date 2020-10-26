@@ -33,20 +33,20 @@ class DQN(nn.Module):
     def forward(self, state):
         """
 
-        :param state: (tuple) (img_tensor or feature map, list(scaled_bbox), list(deque))
+        :param state: (tuple) (img_tensor or feature map, list(bbox), list(deque))
         :return: (tensor) (batch_size, num_actions)
         """
 
-        img_input, scaled_bbox, history_actions = state
-        if isinstance(scaled_bbox, tuple):
-            scaled_bbox = [scaled_bbox]
+        img_input, cur_bbox, history_actions = state
+        if isinstance(cur_bbox, tuple):
+            cur_bbox = [cur_bbox]
         if isinstance(history_actions, deque):
             history_actions = [history_actions]
 
         batch_size = img_input.shape[0]
         device = img_input.device
 
-        global_feature, bbox_feature = self.encoder(img_input, scaled_bbox)
+        global_feature, bbox_feature = self.encoder(img_input, cur_bbox)
 
         # (batch_size, max_history, total_num_actions)
         history_emb= torch.zeros(batch_size, self.max_history, (self.num_actions[0] + self.num_actions[1]))

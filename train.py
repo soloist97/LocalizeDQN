@@ -107,7 +107,7 @@ def train(args):
                                       args['fm_to_memory'])
     voc_loader = DataLoaderPFG(
                     voc_dataset,
-                    batch_size=1, shuffle=args['shuffle'], num_workers=1, pin_memory=True,
+                    batch_size=1, shuffle=args['shuffle'], num_workers=2, pin_memory=True,
                     collate_fn=FastVOCLocalization.collate_fn
                  )
 
