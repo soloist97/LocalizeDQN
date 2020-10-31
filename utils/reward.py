@@ -2,6 +2,27 @@ import  torch
 from torchvision.ops.boxes import box_iou
 
 
+def init_hit_flags(start_bbox, bbox_gt_list):
+    """
+
+    :param start_bbox: (tuple) (xmin, ymin, xmax, ymax)
+    :param bbox_gt_list: (list of tensor) [(4,)]
+    :return: hit_flags: (list)
+    """
+
+    assert len(bbox_gt_list) > 0, "invalid bbox_gt_list input"
+
+    # (1, 4)
+    bbox = torch.tensor([start_bbox], dtype=bbox_gt_list[0].dtype).to(bbox_gt_list[0].device)
+
+    # (M, 4)
+    bbox_gt = torch.stack(bbox_gt_list, dim=0)
+
+    bbox_iou = box_iou(bbox, bbox_gt)  # (1, M)
+
+    return (bbox_iou[0] > 0.5).long().tolist()
+
+
 def reward_by_bboxes(cur_bbox, next_bbox, bbox_gt_list, hit_flags):
     """
 

@@ -25,6 +25,8 @@ class DQN(nn.Module):
         self.layers = nn.Sequential(
             nn.Linear(self.num_inputs, 1024),
             nn.ReLU(),
+            nn.Linear(1024, 1024),
+            nn.ReLU(),
             nn.Linear(1024, 512),
             nn.ReLU(),
             nn.Linear(512, num_actions[0] + num_actions[1])

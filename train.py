@@ -13,7 +13,7 @@ from utils.bbox import next_bbox_by_action
 from utils.loss import compute_td_loss
 from utils.explore import epsilon_by_epoch
 from utils.replay import ReplayBuffer
-from utils.reward import reward_by_bboxes
+from utils.reward import reward_by_bboxes, init_hit_flags
 from evaluate import evaluate
 
 torch.backends.cudnn.benchmark = True
@@ -24,8 +24,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 USE_TB = False
 CONFIG_PATH = './model_params'
-MODEL_NAME = 'debug_ratio'
-TOTAL_EPOCH = 10
+MODEL_NAME = 'debug'
+TOTAL_EPOCH = 11
 
 
 def set_args():
@@ -54,9 +54,9 @@ def set_args():
     # Training Settings
     args['total_epochs'] = TOTAL_EPOCH
     args['max_steps'] = 15
-    args['replay_capacity'] = 80000  # ~ len(trainval) * 16
-    args['replay_initial'] = 3000
-    args['target_update'] = 1  # epochs
+    args['replay_capacity'] = 80000  # ~ len(trainval) * 15
+    args['replay_initial'] = 40000
+    args['target_update'] = 500  # pics
     args['gamma'] = 0.9
     args['shuffle'] = False  # whether shuffle voc_trainval
     args['epsilon_duration'] = 8
@@ -121,10 +121,6 @@ def train(args):
     for epoch in range(args['total_epochs']):
 
         epsilon = epsilon_by_epoch(epoch, duration=args['epsilon_duration'])
-        # update target network
-        if epoch > 0 and epoch % args['target_update'] == 0:
-            print('[INFO]: update target dqn')
-            target_dqn.load_state_dict(dqn.state_dict())
         if USE_TB:
             writer.add_scalar('training/epsilon', epsilon, epoch)
 
@@ -135,13 +131,13 @@ def train(args):
             bbox_gt_list = bbox_gt_list[0]
             image_idx = image_idx[0]
 
-            cur_bbox = (0., 0., img_shape[0], img_shape[1])
+            cur_bbox = (0., 0., float(img_shape[0]), float(img_shape[1]))
             history_actions = deque(maxlen=args['max_history'])  # deque of int
-            hit_flags = [0] * len(bbox_gt_list)  # use 0 instead of -1 in original paper
+            hit_flags = init_hit_flags(cur_bbox, bbox_gt_list)  # use 0 instead of -1 in original paper
             all_rewards = list()
             all_actions = list()
 
-            state = (image_idx, cur_bbox, history_actions)
+            state = (image_idx, cur_bbox, history_actions.copy())
 
             for step in range(args['max_steps']):
 
@@ -176,6 +172,12 @@ def train(args):
                 # for display
                 all_rewards.append(reward)
                 all_actions.append(action)
+
+            # update target network
+            if len(replay_buffer) >= args['replay_initial'] and \
+                    (epoch * len(voc_loader) + it) % args['target_update'] == 0:
+                tqdm.write('[INFO]: update target dqn')
+                target_dqn.load_state_dict(dqn.state_dict())
 
             if USE_TB:
                 writer.add_scalar('training/reward', sum(all_rewards), epoch * len(voc_loader) + it)
