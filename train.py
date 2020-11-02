@@ -13,7 +13,7 @@ from utils.bbox import next_bbox_by_action, resize_bbox
 from utils.loss import compute_td_loss
 from utils.explore import epsilon_by_epoch
 from utils.replay import ReplayBuffer
-from utils.reward import reward_by_bboxes
+from utils.reward import reward_by_bboxes, init_hit_flags
 from evaluate import evaluate
 
 torch.backends.cudnn.benchmark = True
@@ -44,15 +44,17 @@ def set_args():
 
     # Training Settings
     args['total_epochs'] = TOTAL_EPOCH
-    args['max_steps'] = 3
-    args['replay_capacity'] = 48000  # ~ len(trainval) * 3
-    args['replay_initial'] = 300
-    args['target_update'] = 1000
+    args['max_steps'] = 15
+    args['replay_capacity'] = 17000 * 15  # ~ len(trainval) * 15
+    args['replay_initial'] = 1000 * 15
+    args['target_update'] = 4000  # pics
+    args['evaluate_duration'] = 16000  # pics
     args['gamma'] = 0.9
     args['shuffle'] = False  # whether shuffle voc_trainval
-    args['epsilon_duration'] = int(TOTAL_EPOCH * 4 / 5)
+    args['epsilon_duration'] = 8
 
-    args['lr'] = 1e-3
+    args['lr'] = 3e-4
+    args['weight_decay'] = 1e-4
     args['batch_size'] = 16
     args['grad_clip'] = 1.
 
@@ -64,15 +66,16 @@ def set_args():
     return args
 
 
-def save_model(dqn, optimizer, epoch, checkpoint_name=None):
+def save_model(dqn, optimizer, epoch, it, checkpoint_name=None):
 
     states = {'config_path': os.path.join(CONFIG_PATH, MODEL_NAME, 'config.json'),
               'dqn': dqn.state_dict(),
               'optimizer': optimizer.state_dict(),
-              'epoch': epoch}
+              'epoch': epoch,
+              'it': it}
 
     filename = os.path.join('model_params', MODEL_NAME,
-                            '{}.pth.tar'.format(checkpoint_name if checkpoint_name else 'epoch_'+str(epoch)))
+                            '{}.pth.tar'.format(checkpoint_name if checkpoint_name else 'epoch_{}_iter_{}'.format(epoch, it)))
     print('Saving checkpoint to {}'.format(filename))
     torch.save(states, filename)
 
@@ -91,7 +94,7 @@ def train(args):
     dqn = dqn.to(device)
     target_dqn = target_dqn.to(device)
 
-    optimizer = torch.optim.Adam(dqn.parameters(), lr=args['lr'])
+    optimizer = torch.optim.RMSprop(dqn.parameters(), lr=args['lr'], weight_decay=args['weight_decay'])
 
     # === prepare data loader ===
     voc_loader = DataLoaderPFG(CombinedDataset(
@@ -126,11 +129,11 @@ def train(args):
             cur_bbox = (0., 0., original_shape[0], original_shape[1])
             scale_factors = (224. / original_shape[0], 224. / original_shape[1])
             history_actions = deque(maxlen=args['max_history'])  # deque of int
-            hit_flags = [0] * len(bbox_gt_list)  # use 0 instead of -1 in original paper
+            hit_flags = init_hit_flags(cur_bbox, bbox_gt_list)  # use 0 instead of -1 in original paper
             all_rewards = list()
             all_actions = list()
 
-            state = (img_tensor, resize_bbox(cur_bbox, scale_factors), history_actions)
+            state = (img_tensor, resize_bbox(cur_bbox, scale_factors), history_actions.copy())
 
             for step in range(args['max_steps']):
 
@@ -167,7 +170,33 @@ def train(args):
                 all_actions.append(action)
 
             # update target network
-            if (epoch * len(voc_loader) + it) % args['target_update'] == 0:
+            if len(replay_buffer) >= args['replay_initial'] and \
+                    (epoch * len(voc_loader) + it) % args['target_update'] == 0:
+
+                # evaluate before update
+                if (epoch * len(voc_loader) + it) % args['evaluate_duration'] == 0:
+
+                    save_model(dqn, optimizer, epoch, it)
+
+                    pr_result, _, all_action_pred = evaluate(dqn, 'test', args, device, (0.3, 0.5, 0.7))
+
+                    for thr in pr_result.keys():
+                        print('[IOU threshold]: ', thr)
+                        print('Precision: {:.4f}   Recall: {:.4f}'.format(pr_result[thr]['P'], pr_result[thr]['R']))
+
+                    print('[Action Pairs]: ')
+                    c = Counter([tuple(ap) for aps in all_action_pred for ap in aps])
+                    for k, v in c.items():
+                        print(k, v)
+
+                    #FIXME change epoch to iter
+                    if USE_TB:
+                        for thr in pr_result.keys():
+                            writer.add_scalar('evaluating/Precision-th-{}'.format(thr), pr_result[thr]['P'], epoch)
+                            writer.add_scalar('evaluating/Recall-th-{}'.format(thr), pr_result[thr]['R'], epoch)
+
+                # update target network
+                tqdm.write('[INFO]: update target dqn')
                 target_dqn.load_state_dict(dqn.state_dict())
 
             if USE_TB:
@@ -176,24 +205,7 @@ def train(args):
             if it % args['display_intervals'] == 0:
                 tqdm.write('[{}][{}] \n rewards {}:{} \n actions {}'.format(epoch, it, sum(all_rewards),
                                                                             all_rewards, all_actions))
-
-        save_model(dqn, optimizer, epoch)
-
-        pr_result, _, all_action_pred = evaluate(dqn, 'test', args, device, (0.3, 0.5, 0.7))
-
-        for thr in pr_result.keys():
-            print('[IOU threshold]: ', thr)
-            print('Precision: {:.4f}   Recall: {:.4f}'.format(pr_result[thr]['P'], pr_result[thr]['R']))
-
-        print('[Action Pairs]: ')
-        c = Counter([tuple(ap) for aps in all_action_pred for ap in aps])
-        for k, v in c.items():
-            print(k, v)
-
-        if USE_TB:
-            for thr in pr_result.keys():
-                writer.add_scalar('evaluating/Precision-th-{}'.format(thr), pr_result[thr]['P'], epoch)
-                writer.add_scalar('evaluating/Recall-th-{}'.format(thr), pr_result[thr]['R'], epoch)
+    save_model(dqn, optimizer, args['total_epochs'], 0)
 
     if USE_TB:
         writer.close()

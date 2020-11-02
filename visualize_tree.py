@@ -12,7 +12,7 @@ from dataloader import VOCLocalization
 
 def visualize_tree(args):
 
-    print('[INFO]: visualizing {} images of {} on {} set'.format('all' if args['num_images'] > 0 else args['num_images'],
+    print('[INFO]: visualizing {} images of {} on {} set'.format(args['num_images'] if args['num_images'] > 0 else 'all',
                                                                   args['json_path'], args['dataset']))
 
     # dataset

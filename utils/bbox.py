@@ -1,3 +1,5 @@
+import math
+
 ACTION_FUNC_DICT = {
     0 : lambda bbox : bbox_scaling(bbox, 0),  # top left
     1 : lambda bbox : bbox_scaling(bbox, 1),  # top right
@@ -109,12 +111,18 @@ def next_bbox_by_action(cur_bbox, action, original_img_shape=None):
 
     new_bbox = ACTION_FUNC_DICT[action](cur_bbox) if action in ACTION_FUNC_DICT.keys() else cur_bbox
 
+    # numerical
+    new_bbox = (float(math.floor(new_bbox[0])),
+                float(math.floor(new_bbox[1])),
+                float(math.ceil(new_bbox[2])),
+                float(math.ceil(new_bbox[3])))
+
     # clip
-    if isinstance(original_img_shape, tuple):
-        new_bbox = (max(0, new_bbox[0]),
-                    max(0, new_bbox[1]),
-                    min(original_img_shape[0], new_bbox[2]),
-                    min(original_img_shape[1], new_bbox[3]))
+    if original_img_shape is not None:
+        new_bbox = (max(0., new_bbox[0]),
+                    max(0., new_bbox[1]),
+                    min(float(original_img_shape[0]), new_bbox[2]),
+                    min(float(original_img_shape[1]), new_bbox[3]))
 
     return new_bbox
 

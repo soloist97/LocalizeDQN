@@ -67,8 +67,8 @@ def evaluate(dqn, dataset, args, device, IoU_thresholds=(0.5, 0.6, 0.7)):
         bbox_pred = list()
         action_pred = list()
         states_deque = deque()  # breath first search  (unscaled_bbox, history_actions)
-        states_deque.append(((0., 0., original_shape[0], original_shape[1]), deque(maxlen=args['max_steps'])))
-        num_nodes_to_add = 2**(args['max_steps'] + 1) - 2
+        states_deque.append(((0., 0., original_shape[0], original_shape[1]), deque(maxlen=args['max_history'])))
+        num_nodes_to_add = 2**(args['max_history'] + 1) - 2
 
         while(len(states_deque) != 0):
 
